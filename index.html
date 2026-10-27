@@ -13,9 +13,9 @@ html,body{height:100%;overflow:hidden}body{background:var(--light);color:var(--d
 h2{font-size:1.2rem;margin:8px 0 6px;display:flex;align-items:center;gap:8px}
 .card{background:#fff;padding:15px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,.05);margin-bottom:15px}
 input[type=file]{width:100%;padding:10px;border:2px dashed #cbd5e1;border-radius:6px;background:#fff;cursor:pointer}
-#reader{width:100%;height:240px;border-radius:8px;overflow:hidden;border:none!important;background:#000;min-height:240px}
+#reader{width:100%;border-radius:8px;overflow:hidden;border:none!important;background:#fff}
 #reader video{width:100%!important;height:240px!important;object-fit:cover!important;display:block}
-#reader__scan_region{min-height:240px!important;height:240px!important}
+#reader__scan_region{min-height:240px!important;height:240px!important;background:#000}
 #reader__dashboard{padding:3px 0 0!important}
 #reader__dashboard_section{padding:0!important}
 #reader__dashboard_section_csr button{padding:5px 8px!important;font-size:.78rem}
@@ -61,7 +61,7 @@ input[type=file]{width:100%;padding:10px;border:2px dashed #cbd5e1;border-radius
 .botoes-acao{position:fixed;bottom:0;left:0;width:100%;padding:12px;background:#fff;box-shadow:0 -4px 10px rgba(0,0,0,.05);display:flex;gap:10px}
 .btn{flex:1;padding:12px;border:none;border-radius:6px;font-weight:bold;font-size:1rem;color:#fff;cursor:pointer;text-align:center}
 .btn-success{background:var(--success)}.btn-danger{background:var(--danger)}
-@media (max-width:380px){body{padding:6px 6px 76px}#reader,#reader__scan_region{height:220px!important;min-height:220px!important}#reader video{height:220px!important}.produto-item{padding:10px}.prod-nome{font-size:.9rem}}
+@media (max-width:380px){body{padding:6px 6px 76px}#reader__scan_region{height:220px!important;min-height:220px!important}#reader video{height:220px!important}.produto-item{padding:10px}.prod-nome{font-size:.9rem}}
 
 .produto-item{align-items:flex-start}
 .prod-main{min-width:0}
@@ -722,9 +722,21 @@ async function iniciarScanner(){
     if(!window.isSecureContext&&location.hostname!=='localhost')throw new Error('A câmera do celular exige uma página HTTPS. Abra este sistema por um endereço que comece com https://.');
     status.innerText='Solicitando acesso à câmera...'; const F=Html5QrcodeSupportedFormats;
     scanner=new Html5QrcodeScanner('reader',{fps:10,qrbox:(w,h)=>({width:Math.floor(Math.min(w*.88,340)),height:Math.floor(Math.min(h*.75,180))}),aspectRatio:1.777778,rememberLastUsedCamera:true,showTorchButtonIfSupported:true,showZoomSliderIfSupported:true,formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.ITF],experimentalFeatures:{useBarCodeDetectorIfSupported:true}},false);
-    scanner.render(onScanSuccess,()=>{}); status.innerText='Aponte a câmera para o código de barras.';
+    scanner.render(onScanSuccess,()=>{}); autoAtivarCamera(); status.innerText='Aponte a câmera para o código de barras.';
   }catch(erro){console.error(erro);if(scanner){try{await scanner.clear()}catch(_){}scanner=null}status.innerText='Não foi possível iniciar a câmera.';alert('Não foi possível abrir a câmera.\n\n'+erro.message+'\n\nVerifique também se o navegador tem permissão para usar a câmera.');}
   finally{iniciando=false;}
+}
+function autoAtivarCamera(){
+  const raiz=$('reader'); if(!raiz)return;
+  const tentar=()=>{
+    const b=document.getElementById('html5-qrcode-button-camera-permission')||document.getElementById('html5-qrcode-button-camera-start');
+    if(b&&!b.disabled&&!b.dataset.auto){b.dataset.auto='1';b.click();}
+  };
+  const fim=Date.now()+30000;
+  const obs=new MutationObserver(()=>{if(Date.now()>fim){obs.disconnect();return;}tentar();});
+  obs.observe(raiz,{childList:true,subtree:true});
+  setTimeout(tentar,300);
+  setTimeout(()=>obs.disconnect(),30000);
 }
 function bloquear(titulo,html){bloqueado=true;emitirSom('erro');if(navigator.vibrate)navigator.vibrate([200,100,200]);$('blq-titulo').innerText=titulo;$('blq-msg').innerHTML=html;$('bloqueio-tela').style.display='flex';}
 function liberarTela(){$('bloqueio-tela').style.display='none';ultimo.t=Date.now();setTimeout(()=>{bloqueado=false},500);}
@@ -821,39 +833,33 @@ function textoWhatsApp(){
   const blocos=[];
   const lojas=[...new Set((B.notas||[]).map(nt=>String(nt.nota?.loja||'').trim()).filter(Boolean))];
   if(lojas.length)blocos.push(`*${lojas.join(' / ')}*`);
-  const titulos={FALTA:'🔻 FALTAS',SOBRA:'🔺 SOBRAS',LOTE:'🏷️ DIVERGÊNCIAS DE LOTE',AVARIA:'⚠️ AVARIAS'};
+  const titulos={FALTA:'🔻 *FALTAS',SOBRA:'🔺 *SOBRAS',LOTE:'🏷️ *LOTE',AVARIA:'⚠️ *AVARIAS'};
   B.notas.forEach(nt=>{
     const nf=String(nt.nota.numero||'?');
     const d=resumoDiscrepancias(nt);
-    if(!d.length){blocos.push(`*NF ${sublinharWhatsApp(nf)}*`);return;}
-    const linhas=[`*NF ${sublinharWhatsApp(nf)} — DIVERGÊNCIAS*`];
+    const linhas=[`*NF ${nf}*`];
     ['FALTA','SOBRA','LOTE','AVARIA'].forEach(tipo=>{
       const itens=d.filter(x=>x.tipo===tipo);
       if(!itens.length)return;
-      linhas.push(`*${titulos[tipo]}*`);
+      linhas.push('',`${titulos[tipo]} (${itens.length})*`);
       itens.forEach(x=>{
         const texto=x.texto.replace(tipo+' — ','');
-        const separador=texto.indexOf(':');
-        const produto=separador>=0?texto.slice(0,separador):texto;
-        const detalhe=separador>=0?texto.slice(separador+1).trim():'';
-        linhas.push(`• ${produto}`);
-        if(tipo==='FALTA')linhas.push(`  Quantidade faltante: ${detalhe}`);
-        else if(tipo==='SOBRA')linhas.push(`  Quantidade excedente: ${detalhe}`);
-        else if(tipo==='LOTE'){
+        const sep=texto.indexOf(':');
+        const produto=(sep>=0?texto.slice(0,sep):texto).replace(/\s*\(GTIN [^)]*\)\s*$/,'');
+        const detalhe=sep>=0?texto.slice(sep+1).trim():'';
+        if(tipo==='FALTA'||tipo==='SOBRA'){
+          linhas.push(`• ${produto} — ${detalhe}`);
+        }else if(tipo==='LOTE'){
+          linhas.push(`• ${produto}`);
           (x.nfLotes||[]).forEach(o=>linhas.push(`  NF: ${o.l} (${fmt(o.q)})`));
           (x.divLotes||[]).forEach(o=>linhas.push(`  Divergente: ${o.l} (${fmt(o.q)})`));
-        } else if(tipo==='AVARIA'){
+        }else if(tipo==='AVARIA'){
           const m=detalhe.match(/^(.*?) un\. danificadas\. Motivo: (.*)$/);
-          if(m)linhas.push(`  Quantidade danificada: ${m[1]} un.`,`  Motivo: ${m[2]}`);
-          else linhas.push(`  ${detalhe}`);
+          linhas.push(m?`• ${produto} — ${m[1]} un. — ${m[2]}`:`• ${produto} — ${detalhe}`);
+          if(x.fotos)linhas.push(`  📷 ${x.fotos} ${x.fotos===1?'foto':'fotos'}`);
         }
-        if(tipo==='AVARIA'&&x.fotos)linhas.push(`  📷 Fotos: ${x.fotos} (enviadas em seguida)`);
-        // Linha em branco entre produtos para facilitar a leitura no WhatsApp.
-        linhas.push('');
       });
-      linhas.push('');
     });
-    while(linhas.length&&linhas[linhas.length-1]==='')linhas.pop();
     blocos.push(linhas.join('\n'));
   });
   return blocos.join('\n\n');
