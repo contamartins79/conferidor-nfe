@@ -146,6 +146,8 @@ input[type=file]{width:100%;padding:10px;border:2px dashed #cbd5e1;border-radius
 .falta-nome{font-weight:750;font-size:.9rem;line-height:1.25;overflow-wrap:anywhere}
 .falta-meta{font-size:.76rem;color:#64748b;margin-top:3px}
 .falta-qtd{color:#dc2626;font-weight:800}
+
+.toast{display:none;position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#0f172a;color:#fff;padding:12px 16px;border-radius:12px;font-weight:700;font-size:.9rem;z-index:2147483000;max-width:88vw;text-align:center;box-shadow:0 6px 20px rgba(0,0,0,.3)}
 </style>
 </head>
 <body>
@@ -415,7 +417,8 @@ $('xmlInput').addEventListener('change', async e => {
   initAudio();
   const files = [...e.target.files];
   if (!files.length) return;
-  if(B.notas.length){const continuar=confirm('Já existe uma conferência aberta. OK = continuar e adicionar as novas NF-e. Cancelar = iniciar uma nova conferência (a atual ficará salva).');if(!continuar){arquivarConferenciaAtual(false);idConferenciaAtual=null;B={notas:[],ativa:-1};S=novaS();salvar();renderTudo();}}
+  if(B.notas.length&&B.finalizada&&B.whatsAppCompartilhado){arquivarConferenciaAtual(true);idConferenciaAtual=null;B={notas:[],ativa:-1};S=novaS();salvar();renderTudo();}
+  else if(B.notas.length){const continuar=confirm('Já existe uma conferência aberta. OK = continuar e adicionar as novas NF-e. Cancelar = iniciar uma nova conferência (a atual ficará salva).');if(!continuar){arquivarConferenciaAtual(false);idConferenciaAtual=null;B={notas:[],ativa:-1};S=novaS();salvar();renderTudo();}}
   const msgs = []; let primeira = -1, semGtin = 0;
   const novasNotas = [];
   for (const f of files) {
@@ -785,7 +788,7 @@ function onScanSuccess(texto){
 /* ---------- Armazenamento ---------- */
 function salvar(sem){try{localStorage.setItem(KEY,JSON.stringify(B));if(!sem)marcarAlteradaSeFinalizada();}catch(e){console.warn('Não foi possível salvar:',e);}}
 window.addEventListener('load',()=>{try{const salvo=localStorage.getItem(KEY);if(!salvo)return;const b=JSON.parse(salvo);if(Array.isArray(b.notas)&&b.notas.length){B=b;B.ativa=Math.min(Math.max(Number(b.ativa)||0,0),b.notas.length-1);S=B.notas[B.ativa];renderTudo();mostrarScanner();}}catch(e){console.error('Erro ao recuperar conferência:',e);localStorage.removeItem(KEY);}});
-async function zerar(){localStorage.removeItem(KEY);B={notas:[],ativa:-1};S=novaS();renderTudo();$('scannerCard').style.display='none';if(scanner){try{await scanner.clear()}catch(e){console.warn(e)}scanner=null;}$('xmlInput').value='';}
+async function zerar(){localStorage.removeItem(KEY);idConferenciaAtual=null;B={notas:[],ativa:-1};S=novaS();renderTudo();$('scannerCard').style.display='none';if(scanner){try{await scanner.clear()}catch(e){console.warn(e)}scanner=null;}$('xmlInput').value='';}
 async function limparConferencia(){if(!B.notas.length)return;if(!confirm('Tem certeza que deseja apagar TODAS as notas e a conferência?'))return;arquivarConferenciaAtual(!!B.finalizada);idConferenciaAtual=null;await zerar();}
 async function removerNota(ni){const idx=ni==null?B.ativa:ni;if(idx<0||!B.notas[idx])return;if(!confirm(`Remover a NF ${B.notas[idx].nota.numero||''} e sua conferência?`))return;B.notas.splice(idx,1);if(!B.notas.length){await zerar();return;}B.ativa=Math.min(idx,B.notas.length-1);S=B.notas[B.ativa];salvar();renderTudo();}
 
@@ -809,9 +812,9 @@ let idConferenciaAtual=null;
 function lerSalvas(){try{const v=JSON.parse(localStorage.getItem(SAVED_KEY)||'[]');return Array.isArray(v)?v:[]}catch(e){return []}}
 function gravarSalvas(a){try{localStorage.setItem(SAVED_KEY,JSON.stringify(a.slice(0,20)))}catch(e){console.warn('Não foi possível guardar o histórico',e)}}
 function idsNFs(b=B){return (b.notas||[]).map(n=>String(n.nota?.numero||'?'))}
-function arquivarConferenciaAtual(finalizada){if(!B.notas?.length)return;const all=lerSalvas();const id=idConferenciaAtual||('conf-'+Date.now()+'-'+Math.random().toString(36).slice(2,7));idConferenciaAtual=id;const obj={id,dataOriginal:B.dataOriginal||new Date().toISOString(),notas:JSON.parse(JSON.stringify(B.notas)),ativa:B.ativa,finalizada:!!finalizada,alteradaAposConclusao:!!B.alteradaAposConclusao,whatsAppCompartilhado:!!B.whatsAppCompartilhado};const i=all.findIndex(x=>x.id===id);if(i>=0)all.splice(i,1);all.unshift(obj);gravarSalvas(all)}
-function marcarAlteradaSeFinalizada(){if(B.finalizada){B.alteradaAposConclusao=true;B.finalizada=false;}if(B.notas?.length)arquivarConferenciaAtual(false)}
-function resumoDiscrepancias(nt){const arr=[];Object.values(nt.itens||{}).forEach(p=>{const delta=round(p.conferido-p.esperado);const base=`${p.nome}${p.ean?' (GTIN '+p.ean+')':''}`;if(delta< -EPS)arr.push({tipo:'FALTA',texto:`FALTA — ${base}: ${fmt(-delta)} un.`});if(delta>EPS)arr.push({tipo:'SOBRA',texto:`SOBRA — ${base}: ${fmt(delta)} un.`});if(p.controlaLote){const nfL=lotesDaNF(p);if(nfL.length){const nfSet=nfL.map(l=>String(l).trim().toUpperCase());const previsto=nfL.map(l=>{const q=p.lotesNF&&p.lotesNF[l];return q?`${l} (${fmt(q)} un.)`:l;}).join(' / ');Object.entries(p.lotes||{}).forEach(([l,q])=>{if(q>EPS && !nfSet.includes(String(l).trim().toUpperCase()))arr.push({tipo:'LOTE',texto:`LOTE — ${base}: previsto ${previsto}, encontrado ${l}, quantidade ${fmt(q)} un.`});});}}if(p.avaria)arr.push({tipo:'AVARIA',fotos:(p.avaria.fotos||[]).length,texto:`AVARIA — ${base}: ${fmt(p.avaria.quantidade)} un. danificadas. Motivo: ${p.avaria.motivo}`});});return arr}
+function arquivarConferenciaAtual(finalizada){if(!B.notas?.length)return;const all=lerSalvas();const id=idConferenciaAtual||B.idSalva||('conf-'+Date.now()+'-'+Math.random().toString(36).slice(2,7));idConferenciaAtual=id;B.idSalva=id;try{localStorage.setItem(KEY,JSON.stringify(B))}catch(e){}const obj={id,dataOriginal:B.dataOriginal||new Date().toISOString(),notas:JSON.parse(JSON.stringify(B.notas)),ativa:B.ativa,finalizada:!!finalizada,alteradaAposConclusao:!!B.alteradaAposConclusao,whatsAppCompartilhado:!!B.whatsAppCompartilhado,reenviar:!!B.reenviar};const i=all.findIndex(x=>x.id===id);if(i>=0)all.splice(i,1);all.unshift(obj);gravarSalvas(all)}
+function marcarAlteradaSeFinalizada(){if(B.finalizada){B.alteradaAposConclusao=true;B.finalizada=false;if(B.whatsAppCompartilhado){B.whatsAppCompartilhado=false;B.reenviar=true;}}if(B.notas?.length)arquivarConferenciaAtual(false)}
+function resumoDiscrepancias(nt){const arr=[];Object.values(nt.itens||{}).forEach(p=>{const delta=round(p.conferido-p.esperado);const base=`${p.nome}${p.ean?' (GTIN '+p.ean+')':''}`;if(delta< -EPS)arr.push({tipo:'FALTA',texto:`FALTA — ${base}: ${fmt(-delta)} un.`});if(delta>EPS)arr.push({tipo:'SOBRA',texto:`SOBRA — ${base}: ${fmt(delta)} un.`});if(p.controlaLote){const nfL=lotesDaNF(p);if(nfL.length){const chave=l=>String(l).trim().toUpperCase();const nfSet=nfL.map(chave);const recebido=l=>{let t=0;Object.entries(p.lotes||{}).forEach(([k,q])=>{if(chave(k)===chave(l))t+=q;});return round(t);};const div=Object.entries(p.lotes||{}).filter(([l,q])=>q>EPS&&!nfSet.includes(chave(l))).map(([l,q])=>({l,q}));if(div.length){const nfInfo=nfL.map(l=>({l,q:recebido(l)}));arr.push({tipo:'LOTE',nfLotes:nfInfo,divLotes:div,texto:`LOTE — ${base}: NF ${nfInfo.map(x=>`${x.l} (${fmt(x.q)})`).join(' / ')}; divergente ${div.map(x=>`${x.l} (${fmt(x.q)})`).join(' / ')}`});}}}if(p.avaria)arr.push({tipo:'AVARIA',fotos:(p.avaria.fotos||[]).length,texto:`AVARIA — ${base}: ${fmt(p.avaria.quantidade)} un. danificadas. Motivo: ${p.avaria.motivo}`});});return arr}
 function todasDiscrepancias(){return B.notas.map(nt=>({nt,arr:resumoDiscrepancias(nt)}))}
 function sublinharWhatsApp(texto){return Array.from(String(texto)).map(c=>c===' '?' ':c+'\u0332').join('')}
 function textoWhatsApp(){
@@ -837,9 +840,8 @@ function textoWhatsApp(){
         if(tipo==='FALTA')linhas.push(`  Quantidade faltante: ${detalhe}`);
         else if(tipo==='SOBRA')linhas.push(`  Quantidade excedente: ${detalhe}`);
         else if(tipo==='LOTE'){
-          const m=detalhe.match(/^previsto (.*?), encontrado (.*?), quantidade (.*?) un\.$/);
-          if(m){linhas.push(`  Lote previsto: ${m[1]}`,`  Lote encontrado: ${m[2]}`,`  Quantidade: ${m[3]} un.`);}
-          else linhas.push(`  ${detalhe}`);
+          (x.nfLotes||[]).forEach(o=>linhas.push(`  NF: ${o.l} (${fmt(o.q)})`));
+          (x.divLotes||[]).forEach(o=>linhas.push(`  Divergente: ${o.l} (${fmt(o.q)})`));
         } else if(tipo==='AVARIA'){
           const m=detalhe.match(/^(.*?) un\. danificadas\. Motivo: (.*)$/);
           if(m)linhas.push(`  Quantidade danificada: ${m[1]} un.`,`  Motivo: ${m[2]}`);
@@ -860,35 +862,41 @@ function renderResumoConferencia(){const grupos=todasDiscrepancias();$('resumoCo
 function fecharResumo(){$('modalResumo').style.display='none';renderTudo()}
 async function compartilharWhatsApp(){
  const text=textoWhatsApp();
- try{if(navigator.share){await navigator.share({text});}else{await navigator.clipboard.writeText(text);alert('Mensagem copiada. Abra o WhatsApp e cole no grupo desejado.');}}
- catch(e){if(e?.name!=='AbortError'){try{await navigator.clipboard.writeText(text);alert('Não foi possível abrir o compartilhamento. Mensagem copiada para colar no WhatsApp.')}catch(_){prompt('Copie a mensagem para compartilhar no WhatsApp:',text)}}}
- const enviou=confirm('Você conseguiu enviar a mensagem pelo WhatsApp?');
- if(!enviou)return;
- B.whatsAppCompartilhado=true;
- try{localStorage.setItem(KEY,JSON.stringify(B));}catch(e){console.warn('Não foi possível salvar o status de envio:',e)}
- if(B.notas?.length){
-  const all=lerSalvas();
-  const assinatura=ns=>(ns||[]).map(n=>String(n.nota?.numero||'?')).sort().join('|');
-  let i=idConferenciaAtual?all.findIndex(x=>x.id===idConferenciaAtual):-1;
-  if(i<0){i=all.findIndex(x=>x.dataOriginal===B.dataOriginal&&assinatura(x.notas)===assinatura(B.notas));}
-  if(i>=0){
-   all[i].whatsAppCompartilhado=true;
-   all[i].notas=JSON.parse(JSON.stringify(B.notas));
-   all[i].ativa=B.ativa;
-   idConferenciaAtual=all[i].id;
-   gravarSalvas(all);
-  }else{
-   const id='conf-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
-   idConferenciaAtual=id;
-   all.unshift({id,dataOriginal:B.dataOriginal||new Date().toISOString(),notas:JSON.parse(JSON.stringify(B.notas)),ativa:B.ativa,finalizada:!!B.finalizada,alteradaAposConclusao:!!B.alteradaAposConclusao,whatsAppCompartilhado:true});
-   gravarSalvas(all);
-  }
+ let enviou=false;
+ try{
+  if(navigator.share){await navigator.share({text});enviou=true;}
+  else{await navigator.clipboard.writeText(text);alert('Mensagem copiada. Abra o WhatsApp e cole no grupo desejado.');enviou=confirm('Você conseguiu enviar a mensagem pelo WhatsApp?');}
+ }catch(e){
+  if(e&&e.name==='AbortError')return;
+  try{await navigator.clipboard.writeText(text);alert('Não foi possível abrir o compartilhamento. Mensagem copiada para colar no WhatsApp.');}
+  catch(_){prompt('Copie a mensagem para compartilhar no WhatsApp:',text);}
+  enviou=confirm('Você conseguiu enviar a mensagem pelo WhatsApp?');
  }
- alert('Status de envio salvo na aba Salvas.');
- if($('modalSalvas').style.display==='flex')abrirListaSalvas();
+ if(!enviou)return;
+ marcarEnviada();
+ if(totalFotosAvaria()>0){toast('Relatório enviado. Agora envie as fotos das avarias.',6000);return;}
+ await encerrarAposEnvio();
 }
-function abrirListaSalvas(){const a=lerSalvas();$('listaConferenciasSalvas').innerHTML=a.length?a.map(x=>(x.notas||[]).map(n=>`<div class="saved-row"><span><b>NF ${esc(n.nota?.numero||'?')}</b><br><small>${esc(new Date(x.dataOriginal).toLocaleDateString('pt-BR'))}${x.finalizada?' · Concluída':''}</small><br><strong style="color:${x.whatsAppCompartilhado?'#15803d':'#dc2626'}">${x.whatsAppCompartilhado?'Enviada':'Não enviada'}</strong></span><button onclick="recuperarConferencia('${esc(x.id)}')">Abrir</button><button onclick="excluirConferenciaSalva('${esc(x.id)}')">Excluir</button></div>`).join('')).join(''):'Nenhuma conferência salva.';$('modalSalvas').style.display='flex'}
-function recuperarConferencia(id){const x=lerSalvas().find(y=>y.id===id);if(!x)return;if(B.notas.length&&!confirm('Substituir a conferência aberta? Ela será salva antes de trocar.'))return;arquivarConferenciaAtual(!!B.finalizada);B=JSON.parse(JSON.stringify({notas:x.notas,ativa:x.ativa,finalizada:x.finalizada,alteradaAposConclusao:x.alteradaAposConclusao,dataOriginal:x.dataOriginal,whatsAppCompartilhado:x.whatsAppCompartilhado}));idConferenciaAtual=id;S=B.notas[B.ativa]||B.notas[0]||novaS();$('modalSalvas').style.display='none';salvar(true);renderTudo();mostrarScanner();if(B.finalizada||B.alteradaAposConclusao){renderResumoConferencia();$('modalResumo').style.display='flex'}}
+function marcarEnviada(){
+  B.finalizada=true;B.alteradaAposConclusao=false;B.reenviar=false;B.whatsAppCompartilhado=true;
+  B.dataOriginal=B.dataOriginal||new Date().toISOString();
+  try{localStorage.setItem(KEY,JSON.stringify(B));}catch(e){}
+  arquivarConferenciaAtual(true);
+  if($('modalSalvas').style.display==='flex')abrirListaSalvas();
+}
+async function encerrarAposEnvio(){
+  idConferenciaAtual=null;
+  $('modalResumo').style.display='none';
+  await zerar();
+  toast('Enviada e guardada em Salvas. Pronto para um novo XML.');
+}
+function toast(msg,ms=4500){
+  let t=$('toastMsg');
+  if(!t){t=document.createElement('div');t.id='toastMsg';t.className='toast';document.body.appendChild(t);}
+  t.textContent=msg;t.style.display='block';clearTimeout(t._t);t._t=setTimeout(()=>{t.style.display='none';},ms);
+}
+function abrirListaSalvas(){const a=lerSalvas();$('listaConferenciasSalvas').innerHTML=a.length?a.map(x=>(x.notas||[]).map(n=>`<div class="saved-row"><span><b>NF ${esc(n.nota?.numero||'?')}</b><br><small>${esc(new Date(x.dataOriginal).toLocaleDateString('pt-BR'))}${x.finalizada?' · Concluída':''}</small><br><strong style="color:${x.whatsAppCompartilhado?'#15803d':(x.reenviar?'#b45309':'#dc2626')}">${x.whatsAppCompartilhado?'Enviada':(x.reenviar?'Alterada, reenviar':'Não enviada')}</strong></span><button onclick="recuperarConferencia('${esc(x.id)}')">Abrir</button><button onclick="excluirConferenciaSalva('${esc(x.id)}')">Excluir</button></div>`).join('')).join(''):'Nenhuma conferência salva.';$('modalSalvas').style.display='flex'}
+function recuperarConferencia(id){const x=lerSalvas().find(y=>y.id===id);if(!x)return;if(B.notas.length&&!confirm('Substituir a conferência aberta? Ela será salva antes de trocar.'))return;arquivarConferenciaAtual(!!B.finalizada);B=JSON.parse(JSON.stringify({notas:x.notas,ativa:x.ativa,finalizada:x.finalizada,alteradaAposConclusao:x.alteradaAposConclusao,dataOriginal:x.dataOriginal,whatsAppCompartilhado:x.whatsAppCompartilhado,reenviar:x.reenviar}));idConferenciaAtual=id;S=B.notas[B.ativa]||B.notas[0]||novaS();$('modalSalvas').style.display='none';salvar(true);renderTudo();mostrarScanner();if(B.finalizada||B.alteradaAposConclusao){renderResumoConferencia();$('modalResumo').style.display='flex'}}
 function excluirConferenciaSalva(id){if(!confirm('Excluir definitivamente esta conferência salva?'))return;gravarSalvas(lerSalvas().filter(x=>x.id!==id));abrirListaSalvas();limparFotosOrfas()}
 
 
@@ -1026,7 +1034,7 @@ async function compartilharFotosAvaria(){
   if(!files.length){alert('Nenhuma foto de avaria encontrada neste aparelho.');return;}
   const text='Fotos de avaria\n'+itens.join('\n');
   if(!(navigator.canShare&&navigator.canShare({files}))){alert('Este navegador não consegue compartilhar fotos diretamente. Abra pelo Chrome (Android) ou Safari (iPhone).');return;}
-  try{await navigator.share({files,text});}catch(e){if(e&&e.name!=='AbortError')alert('Não foi possível compartilhar as fotos.');}
+  try{await navigator.share({files,text});if(B.finalizada&&B.whatsAppCompartilhado)await encerrarAposEnvio();}catch(e){if(e&&e.name!=='AbortError')alert('Não foi possível compartilhar as fotos.');}
 }
 
 
